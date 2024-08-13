@@ -6,3 +6,5 @@
 user:
   '*':
     - dmz_networking
+  'dom0':
+    - nvidia
