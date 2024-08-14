@@ -53,9 +53,7 @@ Turn off memory balancing, adjust other values now.
 - - **`nvidia-domu-finalize.sls`**: Finishes configuration of grub and initrd for use into a template.
  
 6. (dom0) `sudo qubesctl --skip-dom0 --targets=cudatemplate state.sls nvidia-domu-finalize saltenv=user`
-7. `reboot` cudatemplate once again and your nvidia device should work!
-
-More detailed descriptions can be found within each recipe's respective file.
+7. `reboot` `cudatemplate` once again and your nvidia device should work! You can verify this with `nvidia-smi`. Also `lsmod` should show no `nouveau`, only `nvidia*`.
 
 ## License
 
