@@ -1,0 +1,32 @@
+f40-services--install-apps:
+  pkg.installed:
+    - pkgs:
+      - tree
+      - net-tools
+      - nfs-utils
+      - ncdu
+      - htop
+      - vim-minimal
+      - pciutils
+      - less
+      - psmisc
+      - pipewire-qubes
+      - qubes-core-agent-networking
+      - iproute
+      - iputils
+      - qubes-core-agent-dom0-updates
+      - qubes-core-agent-network-manager
+      - network-manager-applet
+      - notification-daemon
+      - polkit
+      - telnet
+      - qubes-usb-proxy
+      - qubes-input-proxy-sender
+      - qubes-core-agent-passwordless-root
+      - qubes-mgmt-salt-vm-connector
+      - qubes-gpg-split
+      - qubes-ctap
+      - wget2
+      - ppp
+      - gnome-terminal
+
