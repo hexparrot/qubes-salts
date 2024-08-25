@@ -1,4 +1,4 @@
-# USAGE: sudo qubesctl --target=SRCVM --show-output state.sls portforward saltenv=user
+# USAGE: sudo qubesctl --targets=SRCVM,SRCVM --show-output state.sls portforward saltenv=user
 
 {% set connections = salt['pillar.get']('dmz_networking:connections') %}
 {% set ports_to_keep = connections | map(attribute='port') | join(' ') %}
@@ -26,15 +26,21 @@ check_if_no_connections_enumerated:
 
 {% else %}
 
-  {% set port = salt['pillar.get']('dmz_networking:port') %}
-  {% set source_vm = salt['pillar.get']('dmz_networking:source_vm') %}
-  {% set target_vm = salt['pillar.get']('dmz_networking:target_vm') %}
-
+  {% set grouped_connections = {} %}
   {% for connection in connections %}
+    {% set port = connection['port'] %}
+    {% if port in grouped_connections %}
+      {% set _ = grouped_connections[port].append(connection) %}
+    {% else %}
+      {% set _ = grouped_connections.update({port: [connection]}) %}
+    {% endif %}
+  {% endfor %}
+
+  {% for port, conn_group in grouped_connections.items() %}
 
     {% if grains['id'] == 'dom0' %}
 
-/etc/qubes/policy.d/30-dmz-networking-{{ connection['port'] }}.policy:
+/etc/qubes/policy.d/30-dmz-networking-{{ port }}.policy:
   file.managed:
     - user: root
     - group: root
@@ -42,21 +48,27 @@ check_if_no_connections_enumerated:
     - require:
       - cmd: dmz_cleanup_old_policy_files
     - contents: |
-        qubes.ConnectTCP +{{ connection['port'] }} {{ connection['source_vm'] }} @default allow target={{ connection['target_vm'] }}
-
-    {% elif grains['id'] == connection['source_vm'] %}
-
-dmz_tcp_forward_{{ connection['port'] }}:
-  cmd.run:
-    - name: qvm-connect-tcp {{ connection['port'] }}:@default:{{ connection['port'] }}
-    - unless: ss -tuln | grep -q ':{{ connection['port'] }} '
-
-dmz_nft_rule_{{ connection['port'] }}:
-  cmd.run:
-    - name: nft add rule ip qubes input tcp dport {{ connection['port'] }} accept
-    - unless: nft list ruleset | grep -q 'tcp dport {{ connection['port'] }} accept'
+        {% for connection in conn_group %}
+        qubes.ConnectTCP +{{ port }} {{ connection['source_vm'] }} @default allow target={{ connection['target_vm'] }}
+        {% endfor %}
 
     {% endif %}
+
+    {% for connection in conn_group %}
+      {% if grains['id'] == connection['source_vm'] %}
+
+dmz_tcp_forward_{{ port }}_{{ connection['source_vm'] }}:
+  cmd.run:
+    - name: qvm-connect-tcp {{ port }}:@default:{{ port }}
+    - unless: ss -tuln | grep -q ':{{ port }} '
+
+dmz_nft_rule_{{ port }}_{{ connection['source_vm'] }}:
+  cmd.run:
+    - name: nft add rule ip qubes input tcp dport {{ port }} accept
+    - unless: nft list ruleset | grep -q 'tcp dport {{ port }} accept'
+
+      {% endif %}
+    {% endfor %}
 
   {% endfor %}
 
