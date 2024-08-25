@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# Script: rolo
+# Purpose: Read-Only LOopback fast deployer
+
+# Check if a parameter is provided
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <filepath>"
+    echo "Optional environment variables:"
+    echo "  FS_TYPE=<xfs|exfat>   Choose the filesystem type (default is exfat)."
+    echo "  EXTRA_MB=<value>      Adds headway by the specified number of megabytes."
+    exit 1
+fi
+
+# Variables
+SOURCE_PATH="$1"
+FS_TYPE=${FS_TYPE:-exfat}  # Default to exfat if FS_TYPE is not set
+IMAGE_NAME=$(mktemp --suffix=.img)  # Generate a temporary image file name
+MIN_IMAGE_SIZE_MB=100  # Minimum size in MB for exFAT, 300 MB for XFS
+EXTRA_MB=${EXTRA_MB:-0}  # Default to 0 if EXTRA_MB is not set
+
+# Adjust minimum size for XFS if selected
+if [ "$FS_TYPE" = "xfs" ]; then
+    MIN_IMAGE_SIZE_MB=300
+fi
+
+# Calculate the size of the path in bytes
+DIR_SIZE_BYTES=$(du -sb "$SOURCE_PATH" | cut -f1)
+
+# Convert the size to megabytes for dd
+TOTAL_SIZE_MB=$(echo "$DIR_SIZE_BYTES / 1024 / 1024 + $EXTRA_MB" | bc)
+
+# Ensure the image size meets the minimum requirement
+if [ "$TOTAL_SIZE_MB" -lt "$MIN_IMAGE_SIZE_MB" ]; then
+    TOTAL_SIZE_MB=$MIN_IMAGE_SIZE_MB
+fi
+
+# Create an empty image file with dd
+dd if=/dev/zero of=$IMAGE_NAME bs=1M count=$TOTAL_SIZE_MB
+
+# Create the filesystem on the image
+if [ "$FS_TYPE" = "xfs" ]; then
+    mkfs.xfs -m crc=0 -n ftype=0 -f $IMAGE_NAME
+else
+    mkfs.exfat $IMAGE_NAME
+fi
+
+# Create a temporary mount point
+MOUNT_POINT=$(mktemp -d)
+
+# Mount the image file (requires sudo)
+sudo mount -o loop $IMAGE_NAME $MOUNT_POINT
+
+# Copy the directory or file into the mounted image
+if [ "$FS_TYPE" = "xfs" ]; then
+    sudo cp -a "$SOURCE_PATH"/* "$MOUNT_POINT/"
+else
+    sudo cp -r "$SOURCE_PATH"/* "$MOUNT_POINT/"
+fi
+
+# Unmount the image
+sudo umount $MOUNT_POINT
+
+# Cleanup
+rmdir $MOUNT_POINT
+
+echo "$FS_TYPE filesystem image created at $IMAGE_NAME containing: $SOURCE_PATH"
+
+sudo losetup -v -fP $IMAGE_NAME
+
+# Prompt the user to press Enter before detaching the loopback device
+echo "Press Enter to detach/delete the loopback device or Ctrl+C to keep it attached."
+read -p "Press [Enter] to continue..."
+
+# Detach all loopback devices associated with the image
+sudo losetup -D /dev/loop0
+
+# Remove the created image
+rm -f $IMAGE_NAME
+
+echo "Loopback devices detached and image file removed. Script complete."
