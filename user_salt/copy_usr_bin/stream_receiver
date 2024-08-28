@@ -1,0 +1,155 @@
+import os
+import socket
+import subprocess
+import threading
+import fcntl
+import wave
+import time
+
+# User edit:
+INBOUND_PORT = 8001
+DOM0_NOTIFY = False
+SEGMENT_LENGTH = 5
+
+# Usually not needing edit
+WHISPER_PORT = 8000
+LENGTH_THRESHOLD = 3.0
+
+def is_file_locked(file_path):
+    """Check if a file is currently locked (likely being written to) using fcntl."""
+    try:
+        with open(file_path, 'a') as file:
+            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(file, fcntl.LOCK_UN)
+            return False  # File is not locked, so it's not being written to
+    except IOError:
+        return True  # File is locked
+
+def get_wav_duration(file_path):
+    """Returns the duration of the WAV file in seconds."""
+    try:
+        with wave.open(file_path, 'rb') as wav_file:
+            frames = wav_file.getnframes()
+            rate = wav_file.getframerate()
+            duration = frames / float(rate)
+            return duration
+    except EOFError:
+        return None  # The file is incomplete
+
+def is_file_stable(file_path, check_interval=1, retries=3):
+    """Check if the file size remains stable over a short period."""
+    previous_size = -1
+    for _ in range(retries):
+        current_size = os.path.getsize(file_path)
+        if current_size == previous_size:
+            return True  # The file size has stabilized
+        previous_size = current_size
+        time.sleep(check_interval)
+    return False  # The file size is still changing
+
+def find_wav_files():
+    """Find all .wav files in the current directory, sorted by creation time."""
+    wav_files = sorted(
+        (f for f in os.listdir('.') if f.endswith('.wav')),
+        key=lambda x: os.path.getctime(x)
+    )
+    return wav_files
+
+def send_to_whisper(file_path):
+    """Send a .wav file to the Whisper server via curl and print the result."""
+    curl_command = [
+        "curl", "-s", "http://localhost:8000/v1/audio/transcriptions",
+        "-F", f"file=@{file_path}",
+        "-F", "language=en",
+        "-F", "response_format=text"
+    ]
+
+    try:
+        result = subprocess.check_output(curl_command, text=True)
+        print(f"{file_path}:  {result}")
+        if DOM0_NOTIFY:
+            send_notification(file_path, result)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to transcribe {file_path}: {e}")
+
+def process_wav_files():
+    """Process all .wav files by sending them to Whisper if they are not locked."""
+    while True:
+        wav_files = find_wav_files()
+
+        for wav_file in wav_files:
+            if not is_file_locked(wav_file) and is_file_stable(wav_file):
+                file_size = os.path.getsize(wav_file)
+                duration = get_wav_duration(wav_file)
+                
+                # Ensure the file is non-empty and has an expected duration
+                if file_size > 1024 and duration is not None and duration >= LENGTH_THRESHOLD:
+                    send_to_whisper(wav_file)
+                    os.remove(wav_file)  # Remove the file after processing
+                else:
+                    pass #print(f"File {wav_file} is either too small, incomplete, or has insufficient duration (size: {file_size} bytes, duration: {duration} seconds). Skipping.")
+            else:
+                pass #print(f"File {wav_file} is still being written to or is unstable. Waiting...")
+                time.sleep(1)
+
+        time.sleep(2)  # Wait before checking again
+
+def handle_client_connection(client_socket):
+    """Handles the incoming data from the client and pipes it to FFMPEG for segmentation."""
+    ffmpeg_command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", "pipe:0",  # Read from stdin (the incoming stream)
+        "-f", "segment",
+        "-segment_time", f"{SEGMENT_LENGTH}",  # Segment into 5-second files
+        "-c", "copy",
+        "-reset_timestamps", "1",
+        "output_%03d.wav"  # Output segmented files as output_000.wav, output_001.wav, etc.
+    ]
+
+    # Start FFMPEG process
+    ffmpeg_proc = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE)
+
+    try:
+        while True:
+            data = client_socket.recv(4096)  # Receive data from the client
+            if not data:
+                break  # Stop if no data is received (client disconnected)
+            ffmpeg_proc.stdin.write(data)  # Feed the data to FFMPEG
+            ffmpeg_proc.stdin.flush()
+    finally:
+        client_socket.close()  # Ensure the socket is closed
+        ffmpeg_proc.stdin.close()  # Close FFMPEG's stdin
+        ffmpeg_proc.wait()  # Wait for FFMPEG to finish processing
+
+def start_tcp_server(host='0.0.0.0', port=INBOUND_PORT):
+    """Starts a TCP server that listens for connections and processes incoming data."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((host, port))
+    server.listen(5)  # Listen for up to 5 connections
+
+    print(f"Listening on {host}:{port}...")
+
+    while True:
+        client_socket, addr = server.accept()
+        print(f"Accepted connection from {addr}")
+        client_handler = threading.Thread(target=handle_client_connection, args=(client_socket,))
+        client_handler.start()
+
+def send_notification(title, message, timeout=2500):
+    """
+    Sends a notification using notify-send.
+
+    :param title: Title of the notification.
+    :param message: Message content of the notification.
+    :param timeout: Duration of the notification in milliseconds (default is 2500 ms).
+    """
+    subprocess.run(['notify-send', title, message, '-t', str(timeout)])
+
+if __name__ == "__main__":
+    # Start the TCP server in a separate thread
+    server_thread = threading.Thread(target=start_tcp_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    # Start processing wav files for transcription
+    process_wav_files()

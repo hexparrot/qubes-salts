@@ -6,5 +6,6 @@
 user:
   '*':
     - dmz_networking
+    - whisper_server
   'dom0':
     - nvidia
