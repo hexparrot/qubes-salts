@@ -1,28 +1,25 @@
 # Qubes OS Salt Recipes
 
 This repository contains a collection of SaltStack recipes designed specifically for managing and automating various tasks within Qubes OS.
+
 Examine all the states yourself and understand what they do. Use at your own risk.
 
+Tested and built against Qubes OS 4.2.
+
 ## Table of Contents
-- [Requirements](#requirements)
 - [Usage](#usage)
-- [Recipes Overview](#recipes-overview)
 - [License](#license)
 - [Contact](#contact)
-
-## Requirements
-
-- **Qubes OS version**: Tested and built against Qubes OS 4.2.
-- **SaltStack**: Installed by default on your Qubes OS installation.
-- **Qubes-dom0-update**: Ensure your dom0 is updated regularly to avoid compatibility issues.
 
 ## Usage
 
 Here's a brief overview of the available recipes:
 
-- **`portforward.sls`**: Automates the configuration of VM networking.
+### Intra-Qube TCP Port Forwarding
 
-In user_pillar/dmz_networking.sls:
+This salt state helps automate the configuration of intra-VM networking. From the `<source_vm>`, activates `qubes.ConnectTCP` allowing direct access to the `<target_vm>:<port>`.
+
+Define one or more connections in `user_pillar/dmz_networking.sls`:
 
 ```dmz_networking:
   connections:
@@ -31,29 +28,30 @@ In user_pillar/dmz_networking.sls:
       target_vm: 'llm'
     # running invoke.ai
 ```
-Each stanza can be used to set up a separate secure channel between <source_vm> and <target_vm>. This is implemented through qvm-connect-tcp.
+Per the above example, this would allow connections initiated on `stable-diffusion` to reach `llm:<port>` via `localhost:<port>`.
 
-- **`nvidia-dom0-prep.sls`**: Based on Debian-12 Qubes template, prepare the vm by creating a standalone VM with the necessary dracut/grub changes.
+### NVIDIA/CUDA-enabled Debian 12 Qube
+Prepare a TemplateVM by creating a standalone VM with the necessary dracut/grub changes to support GPU acceleration.
 
 Instructions:
 
-1. Download nvidia linux driver, copy it to dom0
-2. Update /user_pillar/nvidia.sls to update nvidia_dom0_path to match the location of step #1
-3. (dom0) sudo qubesctl state.apply nvidia-dom0-prep saltenv=user
+1. Download nvidia linux driver, copy it to dom0.
+2. Update `/user_pillar/nvidia.sls` to update `nvidia_dom0_path` to match the location of step #1.
+3. (dom0) `sudo qubesctl state.apply nvidia-dom0-prep saltenv=user`
 
 At this point, `cudatemplate` is updated and prepped, and turned off.
 Use this opportunity to ADD devices to VM in Qube settings.
 Be sure to bring along the audio device with the vga device.
-Turn off memory balancing, adjust other values now.
+Turn off memory balancing, adjust other values like memory and storage now.
 
-4. Turn on `cudatemplate` VM
+4. Turn on `cudatemplate` VM.
 5. Run and install nvidia driver manually within `cudatemplate` domU:
 `sudo ./nvidia-installer --no-nouveau-check --no-disable-nouveau --no-rebuild-initramfs --allow-installation-with-running-driver --no-peermem --no-x-check --install-compat32-libs --install-libglvnd --ui=none --systemd -e -q`
 
-- - **`nvidia-domu-finalize.sls`**: Finishes configuration of grub and initrd for use into a template.
+Finish configuration of grub and initrd for use into a template:
  
 6. (dom0) `sudo qubesctl --skip-dom0 --targets=cudatemplate state.sls nvidia-domu-finalize saltenv=user`
-7. `reboot` `cudatemplate` once again and your nvidia device should work! You can verify this with `nvidia-smi`. Also `lsmod` should show no `nouveau`, only `nvidia*`.
+7. `reboot` `cudatemplate` again and your GPU should now be detected by CUDA Toolkit! You can verify this with `nvidia-smi`. Also `lsmod` should show `nvidia*` and no longer `nouveau`.
 
 ## License
 
