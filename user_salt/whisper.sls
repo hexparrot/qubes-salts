@@ -21,7 +21,7 @@ whisper-server--create-qubes:
 
 whisper-server--startup:
   qvm.start:
-    - name: whisper-server
+    - name: {{ salt['pillar.get']('whisper_server:name') }}
 
 whisper-server--dom0-policy-update:
   file.managed:
