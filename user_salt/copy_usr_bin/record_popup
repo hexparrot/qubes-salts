@@ -133,7 +133,7 @@ else
 
     # Start the recording by executing the record_screen script 
     # with selected options in the background
-    "$RECORD_SCRIPT" "$MODE" "$VIDEO_CODEC" "$FRAME_RATE" &
+    FRAME_RATE=$FRAME_RATE VIDEO_CODEC="$VIDEO_CODEC" "$RECORD_SCRIPT" "$MODE" &
 fi
 
 exit 0
