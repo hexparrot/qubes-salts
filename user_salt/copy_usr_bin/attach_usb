@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Define USB controller PCI ID
+USB_CONTROLLER="dom0:06_00.1"
+
+# Get the full line for the USB controller
+PCI_LINE=$(qvm-pci | grep "$USB_CONTROLLER")
+
+# Extract and parse eligible VM names
+VM_LIST=$(echo "$PCI_LINE" | sed -E 's/^.*Controller +//' | sed -E 's/ *(no-strict-reset=True)//g')
+ELIGIBLE_VMS=$(echo "$VM_LIST" | tr ',' '\n' | awk '{$1=$1; print}')
+
+# Find the currently running VM using the USB controller
+CURRENT_VM=""
+for vm in $ELIGIBLE_VMS; do
+  if qvm-ls --running --raw-data --fields=name | grep -q "^$vm$"; then
+    CURRENT_VM=$vm
+    break
+  fi
+done
+
+# If the controller is in use, confirm stopping the current VM
+if [ "$CURRENT_VM" != "" ]; then
+    zenity --question --text="USB Controller is in use by $CURRENT_VM. Stop it?" || exit
+    qvm-shutdown "$CURRENT_VM" || { zenity --error --text="Failed to stop $CURRENT_VM"; exit; }
+    qvm-pci detach "$CURRENT_VM" "$USB_CONTROLLER"
+    qvm-prefs "$CURRENT_VM" virt_mode pvh
+fi
+
+# Select target VM from eligible VMs
+TARGET_VM=$(zenity --list \
+  --title="Attach USB controller to domU" \
+  --text="Select a target VM for USB passthrough:" \
+  --column="DomU" $(qvm-ls --raw-data --fields=name) \
+  --height=500 \
+  --width=500 \
+  --ok-label="Attach" \
+  --cancel-label="Cancel")
+[ -z "$TARGET_VM" ] && exit
+
+# Enable or disable HVM + USB passthrough
+if zenity --question --text="Enable HVM mode with USB passthrough for $TARGET_VM?"; then
+    qvm-shutdown "$TARGET_VM"  # Ensure VM is stopped
+    qvm-prefs "$TARGET_VM" virt_mode hvm
+    qvm-pci attach --persistent "$TARGET_VM" "$USB_CONTROLLER"
+    qvm-start "$TARGET_VM"
+    zenity --info --text="HVM + USB passthrough enabled for $TARGET_VM."
+else
+    qvm-shutdown "$TARGET_VM"  # Ensure VM is stopped
+    qvm-pci detach "$TARGET_VM" "$USB_CONTROLLER"
+    qvm-prefs "$TARGET_VM" virt_mode pvh
+    zenity --info --text="Reverted to PVH without USB passthrough for $TARGET_VM."
+fi
+
+
