@@ -1,0 +1,11 @@
+#!/bin/bash
+
+destination_vm=$(zenity --entry --title="Destination VM" --text="What VM shall I send this screenshot to?")
+qvm-copy-to-vm "$destination_vm" "$1"
+
+if [ $? -eq 0 ]; then
+	notify-send -u normal -i dialog-information "success!" "$1 delivered to $destination_vm"
+else
+	notify-send -u critical -i dialog-information "failed!" "$1 not delivered to $destination_vm"
+fi
+
