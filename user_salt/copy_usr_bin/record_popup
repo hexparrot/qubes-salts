@@ -1,0 +1,142 @@
+#!/bin/bash
+
+# -------------------------------------------------------------------
+# Zenity-Based Screen Recording Script (Stateless)
+# -------------------------------------------------------------------
+# Behavior:
+#   - If ffmpeg is running, find the file being recorded and offer to 
+#     qvm-copy-to-vm for a chosen VM.
+#   - If ffmpeg is not running, present a Zenity form to configure 
+#     and start a new recording via "record_screen" script.
+# -------------------------------------------------------------------
+
+RECORD_SCRIPT="/usr/bin/record_screen"
+VIDEOS_DIR="$HOME/Videos"
+DEFAULT_FRAMERATE=10
+
+########################################
+# 1) Check if ffmpeg is running
+########################################
+if pgrep -x ffmpeg >/dev/null 2>&1; then
+
+    #
+    # Attempt to identify the output file being written by FFmpeg.
+    #
+    # Option A: Parse ps to retrieve the ffmpeg command line,
+    #           looking for the output file argument.
+    #
+    # Example command line parse (very naive - adjust as needed):
+    #
+    #    CMDLINE="$(ps -C ffmpeg -o args= | head -n1)"
+    #    # Try to extract the last argument if it looks like a filename
+    #    CURRENT_FILE="$(echo "$CMDLINE" | awk '{print $NF}')"
+    #
+    # Option B: Grab the most recently modified *.mp4 (or *.mkv, etc.)
+    #           in your recording folder.
+    #
+
+    CURRENT_FILE="$(ls -t "$VIDEOS_DIR"/*.{mp4,mkv,webm} 2>/dev/null | head -n1)"
+
+    # If we can’t find a file, we can handle it gracefully
+    if [ -z "$CURRENT_FILE" ]; then
+        zenity --error --text="FFmpeg is running, but no recorded file was found in $VIDEOS_DIR."
+        exit 1
+    fi
+
+    killall ffmpeg 2>/dev/null
+    # Pause a second, because otherwise zenity gets captured on screen
+    # Poll a few times, up to ~1 second total, waiting for FFmpeg to exit
+    for i in {1..10}; do
+        if ! pgrep -x ffmpeg >/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    zenity --info --text="FFmpeg recorded to: \n$CURRENT_FILE"
+
+    #
+    # Next, present a Zenity prompt to pick the VM for qvm-copy-to-vm.
+    # Adjust how we list VMs depending on your environment:
+    # For instance, on Qubes 4.1, you might do:
+    #   qvm-ls --fields NAME --raw-data
+    # or on older versions: qvm-ls --raw-list
+    #
+    VMS="$(qvm-ls --fields NAME --raw-data 2>/dev/null)"
+    if [ -z "$VMS" ]; then
+      zenity --error --text="No VMs found via qvm-ls."
+      exit 1
+    fi
+
+    # Convert VMs into a Zenity list input
+    VM_SELECTED=$(echo "$VMS" \
+      | zenity --list --title="Select VM to Copy Recording" \
+               --column="Available VMs" \
+               --width=450 --height=600 \
+               --hide-header)
+
+    # Check if user cancelled
+    if [ -z "$VM_SELECTED" ]; then
+        # do nothing, just exit
+        exit 0
+    fi
+
+    # Attempt the qvm-copy-to-vm operation
+    qvm-copy-to-vm "$VM_SELECTED" "$CURRENT_FILE"
+    if [ $? -eq 0 ]; then
+      zenity --info --text="File successfully copied to VM: $VM_SELECTED"
+      qvm-run "$VM_SELECTED" "nautilus /home/user/QubesIncoming/dom0"
+    else
+      zenity --error --text="Failed to copy file to VM: $VM_SELECTED"
+    fi
+
+    exit 0
+
+else
+    ########################################
+    # 2) FFmpeg is not running
+    #    => Present the Start Recording form
+    ########################################
+
+    FORM_OUTPUT=$(zenity --forms \
+        --title="Start Screen Recording" \
+        --text="Configure your recording settings:" \
+        --separator="|" \
+        --add-combo="Mode" \
+          --combo-values="full|left|right|topleft|botleft|topright|botright" \
+        --add-combo="Video Codec" \
+          --combo-values="mpeg4|libx264|libvpx|libvpx-vp9|libaom-av1|mjpeg" \
+        --add-entry="Frame Rate (default ${DEFAULT_FRAMERATE})" \
+        --width=450 \
+        --height=300)
+
+    # Check if the user canceled the dialog
+    if [ $? -ne 0 ]; then
+        exit 0
+    fi
+
+    # Parse the form output
+    MODE=$(echo "$FORM_OUTPUT" | cut -d'|' -f1)
+    VIDEO_CODEC=$(echo "$FORM_OUTPUT" | cut -d'|' -f2)
+    FRAME_RATE=$(echo "$FORM_OUTPUT" | cut -d'|' -f3)
+
+    # Set default frame rate if not provided
+    if [ -z "$FRAME_RATE" ]; then
+        FRAME_RATE=$DEFAULT_FRAMERATE
+    fi
+
+    # Validate that frame rate is a positive integer
+    if ! [[ "$FRAME_RATE" =~ ^[0-9]+$ ]]; then
+        zenity --error --text="Frame Rate must be a positive integer."
+        exit 1
+    fi
+
+    # Start the recording by executing the record_screen script 
+    # with selected options in the background
+    "$RECORD_SCRIPT" "$MODE" "$VIDEO_CODEC" "$FRAME_RATE" &
+fi
+
+exit 0
+
+
+

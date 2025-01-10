@@ -1,0 +1,183 @@
+#!/bin/bash
+
+# -------------------------------------------------------------------
+# Screen Recording Script with Multiple Modes using FFmpeg
+# -------------------------------------------------------------------
+# Modes:
+# full      - Full Screen
+# left      - Left Half Screen
+# right     - Right Half Screen
+# topleft   - Top-Left Quadrant
+# botleft   - Bottom-Left Quadrant
+# topright  - Top-Right Quadrant
+# botright  - Bottom-Right Quadrant
+# -------------------------------------------------------------------
+
+# ----------------------------
+# Configuration Parameters
+# ----------------------------
+
+# Display settings
+DISPLAY_NUM=":0.0"          # X11 display number
+DISPLAY_WIDTH=5120          # Total width of the display
+DISPLAY_HEIGHT=1440         # Total height of the display
+PANEL_HEIGHT=64             # Height of the top panel (adjust if different)
+
+# Output settings
+OUTPUT_DIR="$HOME/Videos"
+mkdir -p "$OUTPUT_DIR"
+
+# Frame rate and quality settings
+FRAME_RATE=${FRAME_RATE:-10}      # Default to 10 fps, override with FRAME_RATE env var
+CRF=${CRF:-28}                     # Constant Rate Factor (lower means better quality), override with CRF env var
+PRESET=${PRESET:-ultrafast}        # Encoding speed vs compression, override with PRESET env var
+
+# Video codec settings
+VIDEO_CODEC=${VIDEO_CODEC:-mpeg4}  # Default codec, override with VIDEO_CODEC env var
+
+# Codec-specific parameters
+# These can be further customized or extended based on the codec chosen
+case $VIDEO_CODEC in
+    libx264)
+        CODEC_PARAMS="-preset $PRESET -crf $CRF"
+        ;;
+    mpeg4)
+        CODEC_PARAMS="-vcodec mpeg4 -q:v 5"
+        ;;
+    libvpx)
+        CODEC_PARAMS="-vcodec libvpx -b:v 1M"
+        ;;
+    libvpx-vp9)
+        CODEC_PARAMS="-vcodec libvpx-vp9 -b:v 1M -crf 30 -cpu-used 4"
+        ;;
+    libaom-av1)
+        CODEC_PARAMS="-vcodec libaom-av1 -b:v 1M -crf 30 -cpu-used 4"
+        ;;
+    mjpeg)
+        CODEC_PARAMS="-vcodec mjpeg -q:v 5"
+        ;;
+    *)
+        echo "Unsupported VIDEO_CODEC: $VIDEO_CODEC"
+        echo "Supported codecs: libx264, mpeg4, libvpx, libvpx-vp9, libaom-av1, mjpeg"
+        exit 1
+        ;;
+esac
+
+# ----------------------------
+# Function to Display Usage
+# ----------------------------
+usage() {
+    echo "Usage: $0 [mode]"
+    echo "Modes:"
+    echo "  full      - Full Screen"
+    echo "  left      - Left Half Screen"
+    echo "  right     - Right Half Screen"
+    echo "  topleft   - Top-Left Quadrant"
+    echo "  botleft   - Bottom-Left Quadrant"
+    echo "  topright  - Top-Right Quadrant"
+    echo "  botright  - Bottom-Right Quadrant"
+    echo ""
+    echo "Environment Variables:"
+    echo "  FRAME_RATE    - Set the frame rate (default: 10)"
+    echo "  VIDEO_CODEC   - Set the video codec (default: libx264)"
+    echo "  CRF           - Set the Constant Rate Factor (default: 28)"
+    echo "  PRESET        - Set the encoding preset (default: ultrafast)"
+    exit 1
+}
+
+# ----------------------------
+# Check for Mode Argument
+# ----------------------------
+if [ -z "$1" ]; then
+    usage
+fi
+
+MODE=$(echo "$1" | tr '[:upper:]' '[:lower:]')  # Convert to lowercase to make it case-insensitive
+
+# ----------------------------
+# Calculate Capture Area Based on Mode
+# ----------------------------
+case $MODE in
+    full)
+        # Full Screen minus Panel
+        CAPTURE_X=0
+        CAPTURE_Y=$PANEL_HEIGHT
+        CAPTURE_W=$DISPLAY_WIDTH
+        CAPTURE_H=$((DISPLAY_HEIGHT - PANEL_HEIGHT))
+        OUTPUT_FILE="fullscreen_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    left)
+        # Left Half Screen minus Panel
+        CAPTURE_X=0
+        CAPTURE_Y=$PANEL_HEIGHT
+        CAPTURE_W=$((DISPLAY_WIDTH / 2))
+        CAPTURE_H=$((DISPLAY_HEIGHT - PANEL_HEIGHT))
+        OUTPUT_FILE="left_half_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    right)
+        # Right Half Screen minus Panel
+        CAPTURE_X=$((DISPLAY_WIDTH / 2))
+        CAPTURE_Y=$PANEL_HEIGHT
+        CAPTURE_W=$((DISPLAY_WIDTH / 2))
+        CAPTURE_H=$((DISPLAY_HEIGHT - PANEL_HEIGHT))
+        OUTPUT_FILE="right_half_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    topleft)
+        # Top-Left Quadrant
+        CAPTURE_X=0
+        CAPTURE_Y=$PANEL_HEIGHT
+        CAPTURE_W=$((DISPLAY_WIDTH / 2))
+        CAPTURE_H=$(((DISPLAY_HEIGHT - PANEL_HEIGHT) / 2))
+        OUTPUT_FILE="top_left_quadrant_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    botleft)
+        # Bottom-Left Quadrant
+        CAPTURE_X=0
+        CAPTURE_Y=$((PANEL_HEIGHT + (DISPLAY_HEIGHT - PANEL_HEIGHT) / 2))
+        CAPTURE_W=$((DISPLAY_WIDTH / 2))
+        CAPTURE_H=$(((DISPLAY_HEIGHT - PANEL_HEIGHT) / 2))
+        OUTPUT_FILE="bottom_left_quadrant_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    topright)
+        # Top-Right Quadrant
+        CAPTURE_X=$((DISPLAY_WIDTH / 2))
+        CAPTURE_Y=$PANEL_HEIGHT
+        CAPTURE_W=$((DISPLAY_WIDTH / 2))
+        CAPTURE_H=$(((DISPLAY_HEIGHT - PANEL_HEIGHT) / 2))
+        OUTPUT_FILE="top_right_quadrant_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    botright)
+        # Bottom-Right Quadrant
+        CAPTURE_X=$((DISPLAY_WIDTH / 2))
+        CAPTURE_Y=$((PANEL_HEIGHT + (DISPLAY_HEIGHT - PANEL_HEIGHT) / 2))
+        CAPTURE_W=$((DISPLAY_WIDTH / 2))
+        CAPTURE_H=$(((DISPLAY_HEIGHT - PANEL_HEIGHT) / 2))
+        OUTPUT_FILE="bottom_right_quadrant_$(date +%Y%m%d_%H%M%S).mp4"
+        ;;
+    *)
+        echo "Invalid mode: $MODE"
+        usage
+        ;;
+esac
+
+# ----------------------------
+# Display Capture Information
+# ----------------------------
+echo "----------------------------------------"
+echo "Recording Mode: $MODE"
+echo "Capture Area: x=$CAPTURE_X, y=$CAPTURE_Y, width=$CAPTURE_W, height=$CAPTURE_H"
+echo "Frame Rate: $FRAME_RATE fps"
+echo "Video Codec: $VIDEO_CODEC"
+echo "Output File: $OUTPUT_DIR/$OUTPUT_FILE"
+echo "----------------------------------------"
+
+# ----------------------------
+# Start Recording with FFmpeg
+# ----------------------------
+ffmpeg -f x11grab \
+       -video_size ${CAPTURE_W}x${CAPTURE_H} \
+       -framerate ${FRAME_RATE} \
+       -i ${DISPLAY_NUM}+${CAPTURE_X},${CAPTURE_Y} \
+       ${CODEC_PARAMS} \
+       "${OUTPUT_DIR}/${OUTPUT_FILE}"
+
