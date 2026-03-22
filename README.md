@@ -30,7 +30,7 @@ Define one or more connections in `user_pillar/dmz_networking.sls`:
 ```
 Per the above example, this would allow connections initiated on `stable-diffusion` to reach `llm:<port>` via `localhost:<port>`.
 
-### NVIDIA/CUDA-enabled Debian 12 Qube
+### NVIDIA/CUDA-enabled Debian 13 Qube
 
 Prepare a TemplateVM by creating a standalone VM with the necessary dracut/grub changes to support GPU acceleration.
 
@@ -41,18 +41,13 @@ Instructions:
 3. (dom0) `sudo qubesctl state.apply nvidia-dom0-prep saltenv=user`
 
 At this point, `cudatemplate` is updated and prepped, and turned off.
-Use this opportunity to ADD devices to VM in Qube settings.
-Be sure to bring along the audio device with the vga device.
-Turn off memory balancing, adjust other values like memory and storage now.
+Attach both the GPU video and audio devices.
 
-4. Turn on `cudatemplate` VM.
-5. Run and install nvidia driver manually within `cudatemplate` domU:
-`sudo ./nvidia-installer --no-nouveau-check --no-disable-nouveau --no-rebuild-initramfs --allow-installation-with-running-driver --no-peermem --no-x-check --install-compat32-libs --install-libglvnd --ui=none --systemd -e -q`
+4. (dom0) `sudo qubesctl --skip-dom0 --targets=cudatemplate state.sls nvidia-domu-finalize saltenv=user`
 
-Finish configuration of grub and initrd for use into a template:
- 
-6. (dom0) `sudo qubesctl --skip-dom0 --targets=cudatemplate state.sls nvidia-domu-finalize saltenv=user`
-7. `reboot` `cudatemplate` again and your GPU should now be detected by CUDA Toolkit! You can verify this with `nvidia-smi`. Also `lsmod` should show `nvidia*` and no longer `nouveau`.
+The template will turn itself off after the driver is installed and configured.
+In turning the template back on and you should be able to see and utilize the driver fully!
+You can verify this with `nvidia-smi`; also, `lsmod` will now show `nvidia*` replaced `nouveau`.
 
 ### Faster-Whisper-Server CPU/GPU Qube
 

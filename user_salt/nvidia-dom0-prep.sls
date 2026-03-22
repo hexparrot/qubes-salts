@@ -1,61 +1,133 @@
-### STAGE 1: CREATE VM, INSTALL DEPENDENCIES, DOWNLOAD SOURCE
+{%- set nvidia = salt['pillar.get']('nvidia', {}) %}
+{%- set driver_path = nvidia.get('driver_dom0_path', '') %}
+{%- set driver_file = nvidia.get('driver_filename', 'nvidia.run') %}
+{%- set templates = nvidia.get('templates', []) %}
 
-cudatemplate--create-vm:
+{%- if grains['id'] != 'dom0' %}
+
+nvidia-dom0-only:
+  test.fail_without_changes:
+    - name: "nvidia-dom0-prep must only run on dom0"
+
+{%- elif not driver_path %}
+
+nvidia-pillar-driver-path-missing:
+  test.fail_without_changes:
+    - name: "nvidia:driver_dom0_path is not set in pillar"
+
+{%- elif not templates %}
+
+nvidia-pillar-templates-missing:
+  test.fail_without_changes:
+    - name: "nvidia:templates list is empty in pillar"
+
+{%- else %}
+
+{%- for tpl in templates %}
+{%- set vm = tpl.get('name', '') %}
+{%- set incoming = '/home/user/QubesIncoming/dom0/' ~ driver_file %}
+{%- set nvidia_src = '/home/user/nvidia' %}
+
+{%- if not vm %}
+
+nvidia-template-name-missing-{{ loop.index }}:
+  test.fail_without_changes:
+    - name: "nvidia:templates entry {{ loop.index }} is missing its name field"
+
+{%- elif not tpl.get('source_template', '') %}
+
+nvidia-source-template-missing-{{ vm }}:
+  test.fail_without_changes:
+    - name: "nvidia:templates entry {{ vm }} is missing source_template"
+
+{%- else %}
+
+{{ vm }}--create-vm:
   qvm.vm:
-    - name: cudatemplate
+    - name: {{ vm }}
     - present:
       - class: StandaloneVM
-      - label: orange
-      - template: debian-12
+      - label: {{ tpl.get('label', 'orange') }}
+      - template: {{ tpl['source_template'] }}
     - prefs:
       - include-in-backups: False
       - kernel: ''
       - kernelopts: ''
-      - memory: 2096
-      - maxmem: 4092
-      - vcpus: 4
+      - memory: {{ tpl.get('memory', 2096) }}
+      - maxmem: {{ tpl.get('maxmem', 4092) }}
+      - vcpus: {{ tpl.get('vcpus', 4) }}
       - virt-mode: hvm
     - features:
       - enable:
         - no-default-kernelopts
 
-cudatemplate--copy_nvidia_drv:
+{{ vm }}--resize-private-volume:
   cmd.run:
-    - name: qvm-copy-to-vm cudatemplate {{ salt['pillar.get']('nvidia_dom0_path') }}
-    - unless: qvm-run cudatemplate 'test -f /home/user/QubesIncoming/dom0/nvidia.run'
-
-cudatemplate--apt-update:
-  cmd.run:
-    - name: qvm-run -u root cudatemplate "apt update"
-
-cudatemplate--apt-install:
-  cmd.run:
-    - name: qvm-run -u root cudatemplate "apt-get install -y make gcc dracut linux-headers-amd64"
-
-cudatemplate--nvidia_drv_exec:
-  cmd.run:
-    - name: qvm-run cudatemplate "chmod +x /home/user/QubesIncoming/dom0/nvidia.run"
-
-# take note, this extracts the src to /home/user/
-cudatemplate--extract_nvidia_drv_src:
-  cmd.run:
-    - name: qvm-run -u user cudatemplate "/home/user/QubesIncoming/dom0/nvidia.run --no-x-check --ui=none --keep --extract-only"
+    - name: qvm-volume resize {{ vm }}:private {{ tpl.get('private_storage', '20GiB') }}
     - require:
-      - cmd: cudatemplate--nvidia_drv_exec
-    - unless: qvm-run -u user cudatemplate "test -d /home/user/nvidia"
+      - qvm: {{ vm }}--create-vm
 
-cudatemplate--rename_nvidia_drv_src:
+{{ vm }}--copy-nvidia-driver:
   cmd.run:
-    - name: qvm-run -u user cudatemplate "mv /home/user/NVIDIA* /home/user/nvidia"
+    - name: qvm-copy-to-vm {{ vm }} {{ driver_path }}
+    - unless: qvm-run --no-gui {{ vm }} 'test -f {{ incoming }}'
     - require:
-      - cmd: cudatemplate--extract_nvidia_drv_src
-    - unless: qvm-run -u user cudatemplate "test -d /home/user/nvidia"
+      - qvm: {{ vm }}--create-vm
 
-cudatemplate--reboot-for-kernel:
+{{ vm }}--apt-update:
+  cmd.run:
+    - name: qvm-run -u root --no-gui {{ vm }} "apt-get update -q"
+    - require:
+      - cmd: {{ vm }}--copy-nvidia-driver
+
+{{ vm }}--apt-install-deps:
+  cmd.run:
+    - name: >
+        qvm-run -u root --no-gui {{ vm }}
+        "apt-get install -y make gcc dracut linux-headers-amd64"
+    - unless: >
+        qvm-run --no-gui {{ vm }}
+        "dpkg -l make gcc dracut linux-headers-amd64 2>/dev/null | grep -c '^ii' | grep -qx '4'"
+    - require:
+      - cmd: {{ vm }}--apt-update
+
+{{ vm }}--chmod-driver:
+  cmd.run:
+    - name: qvm-run --no-gui {{ vm }} "chmod +x {{ incoming }}"
+    - unless: qvm-run --no-gui {{ vm }} "test -d {{ nvidia_src }}"
+    - require:
+      - cmd: {{ vm }}--apt-install-deps
+
+{{ vm }}--extract-driver:
+  cmd.run:
+    - name: >
+        qvm-run -u user --no-gui {{ vm }}
+        "{{ incoming }} --no-x-check --ui=none --keep --extract-only"
+    - unless: qvm-run --no-gui {{ vm }} "test -d {{ nvidia_src }}"
+    - require:
+      - cmd: {{ vm }}--chmod-driver
+
+{{ vm }}--rename-driver-src:
+  cmd.run:
+    - name: >
+        qvm-run -u user --no-gui {{ vm }}
+        "mv /home/user/NVIDIA* {{ nvidia_src }}"
+    - unless: qvm-run --no-gui {{ vm }} "test -d {{ nvidia_src }}"
+    - require:
+      - cmd: {{ vm }}--extract-driver
+
+{{ vm }}--shutdown-for-device-assignment:
   qvm.shutdown:
-    - name: cudatemplate
+    - name: {{ vm }}
     - flags:
       - quiet
       - wait
     - require:
-      - cmd: cudatemplate--rename_nvidia_drv_src
+      - cmd: {{ vm }}--rename-driver-src
+
+{%- endif %}
+{%- endfor %}
+
+{%- endif %}
+
+
