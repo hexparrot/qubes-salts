@@ -9,3 +9,4 @@ user:
     - whisper_server
   'dom0':
     - nvidia
+    - makemkv
